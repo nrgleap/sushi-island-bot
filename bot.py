@@ -63,6 +63,8 @@ def check_glovo(url: str) -> bool:
 
 
 def check_bolt(url: str, browser) -> bool:
+    api_responses = []
+
     ctx = browser.new_context(
         locale="uk-UA",
         timezone_id="Europe/Kyiv",
@@ -70,7 +72,23 @@ def check_bolt(url: str, browser) -> bool:
         permissions=["geolocation"],
         extra_http_headers={"Accept-Language": "uk-UA,uk;q=0.9"},
     )
+
+    def handle_response(response):
+        try:
+            rurl = response.url
+            if response.status == 200 and any(
+                k in rurl for k in ["restaurant", "store", "partner", "menu", "venue", "open"]
+            ):
+                try:
+                    data = str(response.json()).lower()
+                    api_responses.append(f"{rurl[-60:]} => {data[:120]}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     page = ctx.new_page()
+    ctx.on("response", handle_response)
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=20000)
         try:
@@ -87,11 +105,12 @@ def check_bolt(url: str, browser) -> bool:
         body_text = page.inner_text("body")
         content = (page.content() + body_text).lower()
         is_open = ("\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in content
-                   or "open now" in content or "open " in content)
-        preview = body_text[:400].replace("\n", " ")
-        print(f"[BOLT] url={final_url[-50:]} open={is_open} "
+                   or "open now" in content)
+        print(f"[BOLT] url={final_url[-60:]} open={is_open} "
               f"vidch={'vidch' in content} zach={'zach' in content}", flush=True)
-        print(f"[BOLT PREVIEW] {preview}", flush=True)
+        print(f"[BOLT BODY] {body_text[:500].replace(chr(10), ' ')}", flush=True)
+        for r in api_responses[:5]:
+            print(f"[BOLT API] {r}", flush=True)
         return is_open
     finally:
         page.close()
