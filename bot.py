@@ -104,7 +104,7 @@ def check_bolt(url: str, geo: dict, playwright) -> tuple:
             content = (page.content() + page.inner_text("body")).lower()
             is_open = ("\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in content
                        or "open now" in content)
-            screenshot = page.screenshot()
+            screenshot = page.screenshot(full_page=True)
             return is_open, screenshot, final_url
         finally:
             page.close()
