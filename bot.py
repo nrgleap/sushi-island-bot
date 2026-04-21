@@ -98,10 +98,11 @@ def check_bolt(url: str, browser, geo: dict) -> bool:
             )
         except Exception:
             pass
+        final_url = page.url
         content = (page.content() + page.inner_text("body")).lower()
         is_open = ("\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in content
                    or "open now" in content)
-        return is_open, page.screenshot()
+        return is_open, page.screenshot(), final_url
     finally:
         page.close()
         ctx.close()
@@ -110,8 +111,8 @@ def check_bolt(url: str, browser, geo: dict) -> bool:
 def check_store(store: dict, browser):
     if store["platform"] == "Glovo":
         return check_glovo(store["url"]), None
-    is_open, screenshot = check_bolt(store["url"], browser, store["geo"])
-    return is_open, screenshot
+    is_open, screenshot, final_url = check_bolt(store["url"], browser, store["geo"])
+    return is_open, (screenshot, final_url)
 
 
 def build_status_message() -> str:
@@ -160,13 +161,14 @@ def monitor_loop():
                 if first_cycle:
                     first_cycle = False
                     with state_lock:
-                        screenshots = [
-                            (store["name"], store_state[store["id"]].get("preview"))
+                        shots = [
+                            (store["name"], store_state[store["id"]].get("screenshot"))
                             for store in STORES if store["platform"] == "Bolt Food"
                         ]
-                    for name, png in screenshots:
-                        if png:
-                            send_screenshot(f"BOLT DEBUG: {name}", png)
+                    for name, data in shots:
+                        if data:
+                            png, furl = data
+                            send_screenshot(f"BOLT: {name}\n{furl}", png)
                 time.sleep(CHECK_INTERVAL)
         finally:
             browser.close()
@@ -196,9 +198,10 @@ def command_loop():
                             for store in STORES if store["platform"] == "Bolt Food"
                         ]
                     sent = False
-                    for name, png in shots:
-                        if png:
-                            send_screenshot(f"BOLT: {name}", png)
+                    for name, data in shots:
+                        if data:
+                            png, furl = data
+                            send_screenshot(f"BOLT: {name}\n{furl}", png)
                             sent = True
                     if not sent:
                         send_telegram(chat_id, "No screenshots yet (monitoring hasn't run)")
