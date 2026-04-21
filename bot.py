@@ -34,7 +34,7 @@ STORES = [
         "id": "bolt_zpr_sobornyi",
         "name": "\u0417\u0430\u043f\u043e\u0440\u0456\u0436\u0436\u044f (\u0421\u043e\u0431\u043e\u0440\u043d\u0438\u0439 91)",
         "platform": "Bolt Food",
-        "url": "https://food.bolt.eu/uk-ua/500-zaporizhia/p/159274-sushi-island/info/",
+        "url": "https://food.bolt.eu/uk-ua/500-zaporizhia/p/142589-sushi-island/info/",
     },
     {
         "id": "bolt_zpr_yevropeyska",
