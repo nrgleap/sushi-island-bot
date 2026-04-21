@@ -44,9 +44,9 @@ STORES = [
     },
 ]
 
-# Shared state: status + last check time
+# Shared state: status + last check time + debug preview
 state_lock = threading.Lock()
-store_state = {s["id"]: {"open": None, "checked_at": None} for s in STORES}
+store_state = {s["id"]: {"open": None, "checked_at": None, "preview": None} for s in STORES}
 
 
 def send_telegram(chat_id: str, text: str):
@@ -106,20 +106,17 @@ def check_bolt(url: str, browser) -> bool:
         content = (page.content() + body_text).lower()
         is_open = ("\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in content
                    or "open now" in content)
-        print(f"[BOLT] url={final_url[-60:]} open={is_open} "
-              f"vidch={'vidch' in content} zach={'zach' in content}", flush=True)
-        print(f"[BOLT BODY] {body_text[:500].replace(chr(10), ' ')}", flush=True)
-        for r in api_responses[:5]:
-            print(f"[BOLT API] {r}", flush=True)
-        return is_open
+        api_summary = " | ".join(api_responses[:3]) if api_responses else "none"
+        preview = f"url={final_url[-50:]}\nbody={body_text[:300]}\napi={api_summary}"
+        return is_open, preview
     finally:
         page.close()
         ctx.close()
 
 
-def check_store(store: dict, browser) -> bool:
+def check_store(store: dict, browser):
     if store["platform"] == "Glovo":
-        return check_glovo(store["url"])
+        return check_glovo(store["url"]), None
     return check_bolt(store["url"], browser)
 
 
@@ -149,12 +146,12 @@ def monitor_loop():
             while True:
                 for store in STORES:
                     try:
-                        open_now = check_store(store, browser)
+                        open_now, preview = check_store(store, browser)
                         now = time.strftime("%H:%M")
                         print(f"[{now}] {store['platform']} {store['name']}: {'OPEN' if open_now else 'CLOSED'}", flush=True)
                         with state_lock:
                             prev = store_state[store["id"]]["open"]
-                            store_state[store["id"]] = {"open": open_now, "checked_at": now}
+                            store_state[store["id"]] = {"open": open_now, "checked_at": now, "preview": preview}
                         if open_now and prev is False:
                             send_telegram(
                                 CHAT_ID,
@@ -187,6 +184,14 @@ def command_loop():
                 chat_id = str(msg.get("chat", {}).get("id", ""))
                 if text == "/check" and chat_id:
                     send_telegram(chat_id, build_status_message())
+                elif text == "/debug" and chat_id:
+                    with state_lock:
+                        parts = []
+                        for store in STORES:
+                            if store["platform"] == "Bolt Food":
+                                p = store_state[store["id"]].get("preview") or "no data yet"
+                                parts.append(f"=== {store['name']} ===\n{p}")
+                    send_telegram(chat_id, "\n\n".join(parts) if parts else "No Bolt data yet")
         except Exception as e:
             print(f"[CMD ERROR] {e}", flush=True)
             time.sleep(5)
