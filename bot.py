@@ -46,7 +46,7 @@ STORES = [
 
 # Shared state: status + last check time + debug preview
 state_lock = threading.Lock()
-store_state = {s["id"]: {"open": None, "checked_at": None, "preview": None} for s in STORES}
+store_state = {s["id"]: {"open": None, "checked_at": None, "screenshot": None} for s in STORES}
 
 
 def send_telegram(chat_id: str, text: str):
@@ -62,9 +62,19 @@ def check_glovo(url: str) -> bool:
     return GLOVO_CLOSED not in resp.text
 
 
-def check_bolt(url: str, browser) -> bool:
-    api_responses = []
+def send_screenshot(caption: str, png_bytes: bytes):
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+            data={"chat_id": CHAT_ID, "caption": caption},
+            files={"photo": ("screen.png", png_bytes, "image/png")},
+            timeout=30,
+        )
+    except Exception as e:
+        print(f"[SCREENSHOT SEND ERROR] {e}", flush=True)
 
+
+def check_bolt(url: str, browser) -> bool:
     ctx = browser.new_context(
         locale="uk-UA",
         timezone_id="Europe/Kyiv",
@@ -72,23 +82,7 @@ def check_bolt(url: str, browser) -> bool:
         permissions=["geolocation"],
         extra_http_headers={"Accept-Language": "uk-UA,uk;q=0.9"},
     )
-
-    def handle_response(response):
-        try:
-            rurl = response.url
-            if response.status == 200 and any(
-                k in rurl for k in ["restaurant", "store", "partner", "menu", "venue", "open"]
-            ):
-                try:
-                    data = str(response.json()).lower()
-                    api_responses.append(f"{rurl[-60:]} => {data[:120]}")
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
     page = ctx.new_page()
-    ctx.on("response", handle_response)
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=20000)
         try:
@@ -101,14 +95,10 @@ def check_bolt(url: str, browser) -> bool:
             )
         except Exception:
             pass
-        final_url = page.url
-        body_text = page.inner_text("body")
-        content = (page.content() + body_text).lower()
+        content = (page.content() + page.inner_text("body")).lower()
         is_open = ("\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in content
                    or "open now" in content)
-        api_summary = " | ".join(api_responses[:3]) if api_responses else "none"
-        preview = f"url={final_url[-50:]}\nbody={body_text[:300]}\napi={api_summary}"
-        return is_open, preview
+        return is_open, page.screenshot()
     finally:
         page.close()
         ctx.close()
@@ -117,7 +107,8 @@ def check_bolt(url: str, browser) -> bool:
 def check_store(store: dict, browser):
     if store["platform"] == "Glovo":
         return check_glovo(store["url"]), None
-    return check_bolt(store["url"], browser)
+    is_open, screenshot = check_bolt(store["url"], browser)
+    return is_open, screenshot
 
 
 def build_status_message() -> str:
@@ -152,7 +143,7 @@ def monitor_loop():
                         print(f"[{now}] {store['platform']} {store['name']}: {'OPEN' if open_now else 'CLOSED'}", flush=True)
                         with state_lock:
                             prev = store_state[store["id"]]["open"]
-                            store_state[store["id"]] = {"open": open_now, "checked_at": now, "preview": preview}
+                            store_state[store["id"]] = {"open": open_now, "checked_at": now, "screenshot": preview}
                         if open_now and prev is False:
                             send_telegram(
                                 CHAT_ID,
@@ -165,17 +156,14 @@ def monitor_loop():
                         print(f"[ERROR] {store['id']}: {e}", flush=True)
                 if first_cycle:
                     first_cycle = False
-                    parts = []
                     with state_lock:
-                        for store in STORES:
-                            if store["platform"] == "Bolt Food":
-                                p = store_state[store["id"]].get("preview") or "none"
-                                safe = "".join(c if ord(c) >= 32 else " " for c in str(p))
-                                parts.append(f"[{store['id']}]\n{safe[:400]}")
-                    try:
-                        send_telegram(CHAT_ID, "BOOT DEBUG BOLT:\n\n" + "\n---\n".join(parts))
-                    except Exception as e:
-                        print(f"[DEBUG SEND ERROR] {e}", flush=True)
+                        screenshots = [
+                            (store["name"], store_state[store["id"]].get("preview"))
+                            for store in STORES if store["platform"] == "Bolt Food"
+                        ]
+                    for name, png in screenshots:
+                        if png:
+                            send_screenshot(f"BOLT DEBUG: {name}", png)
                 time.sleep(CHECK_INTERVAL)
         finally:
             browser.close()
@@ -200,12 +188,17 @@ def command_loop():
                     send_telegram(chat_id, build_status_message())
                 elif text == "/debug" and chat_id:
                     with state_lock:
-                        parts = []
-                        for store in STORES:
-                            if store["platform"] == "Bolt Food":
-                                p = store_state[store["id"]].get("preview") or "no data yet"
-                                parts.append(f"=== {store['name']} ===\n{p}")
-                    send_telegram(chat_id, "\n\n".join(parts) if parts else "No Bolt data yet")
+                        shots = [
+                            (store["name"], store_state[store["id"]].get("screenshot"))
+                            for store in STORES if store["platform"] == "Bolt Food"
+                        ]
+                    sent = False
+                    for name, png in shots:
+                        if png:
+                            send_screenshot(f"BOLT: {name}", png)
+                            sent = True
+                    if not sent:
+                        send_telegram(chat_id, "No screenshots yet (monitoring hasn't run)")
         except Exception as e:
             print(f"[CMD ERROR] {e}", flush=True)
             time.sleep(5)
