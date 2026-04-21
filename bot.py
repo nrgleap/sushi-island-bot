@@ -67,10 +67,18 @@ def check_bolt(url: str, browser) -> bool:
     page = ctx.new_page()
     try:
         page.goto(url, wait_until="networkidle", timeout=30000)
-        content = page.content()
-        snippet = content[:300].replace("\n", " ")
-        print(f"[BOLT DEBUG] {url[-30:]} | snippet: {snippet}", flush=True)
-        return "відчинено" in content.lower()
+        try:
+            page.wait_for_function(
+                "(document.body.innerText.includes('\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e') || "
+                "document.body.innerText.includes('\u0437\u0430\u0447\u0438\u043d\u0435\u043d\u043e'))",
+                timeout=8000,
+            )
+        except Exception:
+            pass
+        text = page.inner_text("body")
+        snippet = text[:300].replace("\n", " ")
+        print(f"[BOLT DEBUG] {url[-30:]} | {snippet}", flush=True)
+        return "\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in text.lower()
     finally:
         page.close()
         ctx.close()
