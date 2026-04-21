@@ -62,23 +62,28 @@ def check_glovo(url: str) -> bool:
 def check_bolt(url: str, browser) -> bool:
     ctx = browser.new_context(
         locale="uk-UA",
+        timezone_id="Europe/Kyiv",
+        geolocation={"latitude": 48.4647, "longitude": 35.0462},
+        permissions=["geolocation"],
         extra_http_headers={"Accept-Language": "uk-UA,uk;q=0.9"},
     )
     page = ctx.new_page()
     try:
-        page.goto(url, wait_until="networkidle", timeout=30000)
+        page.goto(url, wait_until="domcontentloaded", timeout=20000)
         try:
             page.wait_for_function(
                 "(document.body.innerText.includes('\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e') || "
                 "document.body.innerText.includes('\u0437\u0430\u0447\u0438\u043d\u0435\u043d\u043e'))",
-                timeout=8000,
+                timeout=12000,
             )
         except Exception:
             pass
+        content = page.content()
         text = page.inner_text("body")
-        snippet = text[:300].replace("\n", " ")
-        print(f"[BOLT DEBUG] {url[-30:]} | {snippet}", flush=True)
-        return "\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in text.lower()
+        combined = (content + text).lower()
+        snippet = text[:200].replace("\n", " ")
+        print(f"[BOLT] {url[-25:]} | open={'\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e' in combined} | {snippet}", flush=True)
+        return "\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in combined
     finally:
         page.close()
         ctx.close()
@@ -162,15 +167,20 @@ def command_loop(was_open: dict):
                             send_telegram(chat_id, build_status_message(statuses))
                         elif text == "/debug" and chat_id:
                             bolt_url = STORES[2]["url"]
-                            ctx = browser.new_context(locale="uk-UA")
+                            send_telegram(chat_id, "Checking Bolt Food page...")
+                            ctx = browser.new_context(
+                                locale="uk-UA", timezone_id="Europe/Kyiv",
+                                geolocation={"latitude": 48.4647, "longitude": 35.0462},
+                                permissions=["geolocation"],
+                            )
                             pg = ctx.new_page()
                             try:
-                                pg.goto(bolt_url, wait_until="networkidle", timeout=30000)
+                                pg.goto(bolt_url, wait_until="domcontentloaded", timeout=20000)
                                 pg.wait_for_timeout(5000)
-                                body_text = pg.inner_text("body")[:800]
-                                send_telegram(chat_id, f"[BOLT PAGE TEXT]\n{body_text}")
+                                body_text = pg.inner_text("body")[:600]
+                                send_telegram(chat_id, f"[BOLT]\n{body_text}")
                             except Exception as de:
-                                send_telegram(chat_id, f"[DEBUG ERROR] {de}")
+                                send_telegram(chat_id, f"[ERROR] {str(de)[:300]}")
                             finally:
                                 pg.close()
                                 ctx.close()
