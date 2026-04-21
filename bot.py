@@ -77,46 +77,39 @@ def send_screenshot(caption: str, png_bytes: bytes):
         print(f"[SCREENSHOT SEND ERROR] {e}", flush=True)
 
 
-def check_bolt(url: str, geo: dict, playwright) -> tuple:
-    browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+def check_bolt(url: str, geo: dict, browser) -> tuple:
+    ctx = browser.new_context(
+        locale="uk-UA",
+        timezone_id="Europe/Kyiv",
+        geolocation=geo,
+        permissions=["geolocation"],
+        extra_http_headers={"Accept-Language": "uk-UA,uk;q=0.9"},
+    )
+    page = ctx.new_page()
     try:
-        ctx = browser.new_context(
-            locale="uk-UA",
-            timezone_id="Europe/Kyiv",
-            geolocation=geo,
-            permissions=["geolocation"],
-            extra_http_headers={"Accept-Language": "uk-UA,uk;q=0.9"},
-        )
-        page = ctx.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            try:
-                page.wait_for_function(
-                    "(document.body.innerText.toLowerCase().includes('\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e') || "
-                    "document.body.innerText.toLowerCase().includes('\u0437\u0430\u0447\u0438\u043d\u0435\u043d\u043e') || "
-                    "document.body.innerText.toLowerCase().includes('open') || "
-                    "document.body.innerText.toLowerCase().includes('closed'))",
-                    timeout=12000,
-                )
-            except Exception:
-                pass
-            final_url = page.url
-            content = (page.content() + page.inner_text("body")).lower()
-            is_open = ("\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in content
-                       or "open now" in content)
-            screenshot = page.screenshot(full_page=True)
-            return is_open, screenshot, final_url
-        finally:
-            page.close()
-            ctx.close()
+            page.wait_for_function(
+                "(document.body.innerText.toLowerCase().includes('\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e') || "
+                "document.body.innerText.toLowerCase().includes('\u0437\u0430\u0447\u0438\u043d\u0435\u043d\u043e'))",
+                timeout=25000,
+            )
+        except Exception:
+            pass
+        final_url = page.url
+        content = (page.content() + page.inner_text("body")).lower()
+        is_open = "\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in content
+        screenshot = page.screenshot(full_page=True)
+        return is_open, screenshot, final_url
     finally:
-        browser.close()
+        page.close()
+        ctx.close()
 
 
-def check_store(store: dict, playwright):
+def check_store(store: dict, browser):
     if store["platform"] == "Glovo":
         return check_glovo(store["url"]), None
-    is_open, screenshot, final_url = check_bolt(store["url"], store["geo"], playwright)
+    is_open, screenshot, final_url = check_bolt(store["url"], store["geo"], browser)
     return is_open, (screenshot, final_url)
 
 
@@ -141,12 +134,13 @@ def build_status_message() -> str:
 def monitor_loop():
     print("Bot started. Monitoring Sushi Island...", flush=True)
     with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         first_cycle = True
         try:
             while True:
                 for store in STORES:
                     try:
-                        open_now, preview = check_store(store, p)
+                        open_now, preview = check_store(store, browser)
                         now = time.strftime("%H:%M")
                         print(f"[{now}] {store['platform']} {store['name']}: {'OPEN' if open_now else 'CLOSED'}", flush=True)
                         with state_lock:
@@ -175,7 +169,7 @@ def monitor_loop():
                             send_screenshot(f"BOLT: {name}\n{furl}", png)
                 time.sleep(CHECK_INTERVAL)
         finally:
-            pass
+            browser.close()
 
 
 def command_loop():
