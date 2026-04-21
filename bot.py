@@ -84,11 +84,14 @@ def check_bolt(url: str, browser) -> bool:
         except Exception:
             pass
         final_url = page.url
-        content = (page.content() + page.inner_text("body")).lower()
+        body_text = page.inner_text("body")
+        content = (page.content() + body_text).lower()
         is_open = ("\u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e" in content
                    or "open now" in content or "open " in content)
-        print(f"[BOLT] url={final_url[-40:]} open={is_open} "
+        preview = body_text[:400].replace("\n", " ")
+        print(f"[BOLT] url={final_url[-50:]} open={is_open} "
               f"vidch={'vidch' in content} zach={'zach' in content}", flush=True)
+        print(f"[BOLT PREVIEW] {preview}", flush=True)
         return is_open
     finally:
         page.close()
