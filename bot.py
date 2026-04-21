@@ -160,20 +160,17 @@ def command_loop(was_open: dict):
                                 except Exception:
                                     statuses[store["id"]] = None
                             send_telegram(chat_id, build_status_message(statuses))
-                        elif text == "/screenshot" and chat_id:
+                        elif text == "/debug" and chat_id:
                             bolt_url = STORES[2]["url"]
                             ctx = browser.new_context(locale="uk-UA")
                             pg = ctx.new_page()
                             try:
                                 pg.goto(bolt_url, wait_until="networkidle", timeout=30000)
-                                pg.wait_for_timeout(3000)
-                                shot = pg.screenshot(full_page=False)
-                                requests.post(
-                                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-                                    data={"chat_id": chat_id},
-                                    files={"photo": ("screen.png", shot, "image/png")},
-                                    timeout=15,
-                                )
+                                pg.wait_for_timeout(5000)
+                                body_text = pg.inner_text("body")[:800]
+                                send_telegram(chat_id, f"[BOLT PAGE TEXT]\n{body_text}")
+                            except Exception as de:
+                                send_telegram(chat_id, f"[DEBUG ERROR] {de}")
                             finally:
                                 pg.close()
                                 ctx.close()
