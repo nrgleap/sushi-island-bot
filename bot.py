@@ -29,18 +29,21 @@ STORES = [
         "name": "\u0414\u043d\u0456\u043f\u0440\u043e",
         "platform": "Bolt Food",
         "url": "https://food.bolt.eu/uk-ua/499-dnipro/p/159274-sushi-island/info/",
+        "geo": {"latitude": 48.4647, "longitude": 35.0462},
     },
     {
         "id": "bolt_zpr_sobornyi",
         "name": "\u0417\u0430\u043f\u043e\u0440\u0456\u0436\u0436\u044f (\u0421\u043e\u0431\u043e\u0440\u043d\u0438\u0439 91)",
         "platform": "Bolt Food",
         "url": "https://food.bolt.eu/uk-ua/500-zaporizhia/p/142589-sushi-island/info/",
+        "geo": {"latitude": 47.8388, "longitude": 35.1396},
     },
     {
         "id": "bolt_zpr_yevropeyska",
         "name": "\u0417\u0430\u043f\u043e\u0440\u0456\u0436\u0436\u044f (\u0404\u0432\u0440\u043e\u043f\u0435\u0439\u0441\u044c\u043a\u0430 4)",
         "platform": "Bolt Food",
-        "url": "https://food.bolt.eu/uk-ua/500-zaporizhia/p/143786/info/",
+        "url": "https://food.bolt.eu/uk-ua/500-zaporizhia/p/143786-sushi-island-vulievropeyska/info/",
+        "geo": {"latitude": 47.8388, "longitude": 35.1396},
     },
 ]
 
@@ -74,11 +77,11 @@ def send_screenshot(caption: str, png_bytes: bytes):
         print(f"[SCREENSHOT SEND ERROR] {e}", flush=True)
 
 
-def check_bolt(url: str, browser) -> bool:
+def check_bolt(url: str, browser, geo: dict) -> bool:
     ctx = browser.new_context(
         locale="uk-UA",
         timezone_id="Europe/Kyiv",
-        geolocation={"latitude": 48.4647, "longitude": 35.0462},
+        geolocation=geo,
         permissions=["geolocation"],
         extra_http_headers={"Accept-Language": "uk-UA,uk;q=0.9"},
     )
@@ -107,7 +110,7 @@ def check_bolt(url: str, browser) -> bool:
 def check_store(store: dict, browser):
     if store["platform"] == "Glovo":
         return check_glovo(store["url"]), None
-    is_open, screenshot = check_bolt(store["url"], browser)
+    is_open, screenshot = check_bolt(store["url"], browser, store["geo"])
     return is_open, screenshot
 
 
