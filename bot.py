@@ -2,25 +2,48 @@ import os
 import time
 import threading
 import requests
+from playwright.sync_api import sync_playwright
 
 BOT_TOKEN = os.environ["TG_BOT_TOKEN"]
 CHAT_ID = os.environ["TG_CHAT_ID"]
-GLOVO_URL = "https://glovoapp.com/uk/ua/dnipro/stores/sushi-island-dnp"
 CHECK_INTERVAL = 900  # 15 minutes
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+GLOVO_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+GLOVO_CLOSED = "\u0422\u0438\u043c\u0447\u0430\u0441\u043e\u0432\u043e \u043d\u0435 \u043f\u0440\u0430\u0446\u044e\u0454"
+BOLT_OPEN = "\u0417\u0430\u0440\u0430\u0437 \u0432\u0456\u0434\u0447\u0438\u043d\u0435\u043d\u043e"
 
-CLOSED_TEXT = "\u0422\u0438\u043c\u0447\u0430\u0441\u043e\u0432\u043e \u043d\u0435 \u043f\u0440\u0430\u0446\u044e\u0454"
-OPEN_MSG = (
-    "\U0001F363 Sushi Island \u0432\u0456\u0434\u043a\u0440\u0438\u0442\u043e! "
-    "\u041c\u043e\u0436\u043d\u0430 \u0437\u0430\u043c\u043e\u0432\u043b\u044f\u0442\u0438:\n"
-    "https://glovoapp.com/uk/ua/dnipro/stores/sushi-island-dnp"
-)
-
-
-def is_store_open() -> bool:
-    resp = requests.get(GLOVO_URL, headers=HEADERS, timeout=15)
-    return CLOSED_TEXT not in resp.text
+STORES = [
+    {
+        "id": "glovo_dnipro",
+        "name": "\u0414\u043d\u0456\u043f\u0440\u043e",
+        "platform": "Glovo",
+        "url": "https://glovoapp.com/uk/ua/dnipro/stores/sushi-island-dnp",
+    },
+    {
+        "id": "glovo_zpr",
+        "name": "\u0417\u0430\u043f\u043e\u0440\u0456\u0436\u0436\u044f",
+        "platform": "Glovo",
+        "url": "https://glovoapp.com/uk/ua/zaporizhzhia/stores/sushi-island-zpr-1hh7e",
+    },
+    {
+        "id": "bolt_dnipro",
+        "name": "\u0414\u043d\u0456\u043f\u0440\u043e",
+        "platform": "Bolt Food",
+        "url": "https://food.bolt.eu/uk-ua/499-dnipro/p/159274-sushi-island/info/",
+    },
+    {
+        "id": "bolt_zpr_sobornyi",
+        "name": "\u0417\u0430\u043f\u043e\u0440\u0456\u0436\u0436\u044f (\u0421\u043e\u0431\u043e\u0440\u043d\u0438\u0439 91)",
+        "platform": "Bolt Food",
+        "url": "https://food.bolt.eu/uk-ua/500-zaporizhia/p/159274-sushi-island/info/",
+    },
+    {
+        "id": "bolt_zpr_yevropeyska",
+        "name": "\u0417\u0430\u043f\u043e\u0440\u0456\u0436\u0436\u044f (\u0404\u0432\u0440\u043e\u043f\u0435\u0439\u0441\u044c\u043a\u0430 4)",
+        "platform": "Bolt Food",
+        "url": "https://food.bolt.eu/uk-ua/500-zaporizhia/p/143786/info/",
+    },
+]
 
 
 def send_telegram(chat_id: str, text: str):
@@ -31,67 +54,112 @@ def send_telegram(chat_id: str, text: str):
     )
 
 
-def monitor_loop():
+def check_glovo(url: str) -> bool:
+    resp = requests.get(url, headers=GLOVO_HEADERS, timeout=15)
+    return GLOVO_CLOSED not in resp.text
+
+
+def check_bolt(url: str, browser) -> bool:
+    page = browser.new_page()
+    try:
+        page.goto(url, wait_until="networkidle", timeout=30000)
+        content = page.content()
+        return BOLT_OPEN in content
+    finally:
+        page.close()
+
+
+def check_store(store: dict, browser) -> bool:
+    if store["platform"] == "Glovo":
+        return check_glovo(store["url"])
+    else:
+        return check_bolt(store["url"], browser)
+
+
+def build_status_message(statuses: dict) -> str:
+    emoji = {True: "\U0001F7E2", False: "\U0001F534", None: "\u26AA"}
+    label = {True: "\u0432\u0456\u0434\u043a\u0440\u0438\u0442\u043e", False: "\u0437\u0430\u043a\u0440\u0438\u0442\u043e", None: "?"}
+
+    lines = ["\U0001F4CA \u0421\u0442\u0430\u0442\u0443\u0441 \u0432\u0441\u0456\u0445 \u0442\u043e\u0447\u043e\u043a:\n"]
+    current_platform = None
+    for store in STORES:
+        if store["platform"] != current_platform:
+            current_platform = store["platform"]
+            lines.append(f"\n{store['platform']}:")
+        st = statuses.get(store["id"])
+        lines.append(f"  {emoji[st]} {store['name']} \u2014 {label[st]}")
+
+    return "\n".join(lines)
+
+
+def monitor_loop(was_open: dict):
     print("Monitor started.")
-    was_open = None
-    while True:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         try:
-            open_now = is_store_open()
-            status = "OPEN" if open_now else "CLOSED"
-            print(f"[{time.strftime('%H:%M:%S')}] Store is {status}")
-            if open_now and was_open is False:
-                send_telegram(CHAT_ID, OPEN_MSG)
-            was_open = open_now
-        except Exception as e:
-            print(f"[MONITOR ERROR] {e}")
-        time.sleep(CHECK_INTERVAL)
+            while True:
+                for store in STORES:
+                    try:
+                        open_now = check_store(store, browser)
+                        status = "OPEN" if open_now else "CLOSED"
+                        print(f"[{time.strftime('%H:%M:%S')}] {store['platform']} {store['name']}: {status}")
+                        if open_now and was_open[store["id"]] is False:
+                            send_telegram(
+                                CHAT_ID,
+                                f"\U0001F7E2 Sushi Island \u0432\u0456\u0434\u043a\u0440\u0438\u043b\u043e\u0441\u044f!\n\n"
+                                f"\U0001F4F1 {store['platform']}\n"
+                                f"\U0001F4CD {store['name']}\n"
+                                f"\U0001F517 {store['url']}"
+                            )
+                        was_open[store["id"]] = open_now
+                    except Exception as e:
+                        print(f"[ERROR] {store['id']}: {e}")
+                time.sleep(CHECK_INTERVAL)
+        finally:
+            browser.close()
 
 
-def command_loop():
+def command_loop(was_open: dict):
     print("Command handler started.")
     offset = 0
-    while True:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         try:
-            resp = requests.get(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
-                params={"offset": offset, "timeout": 30},
-                timeout=35,
-            )
-            for update in resp.json().get("result", []):
-                offset = update["update_id"] + 1
-                msg = update.get("message", {})
-                text = msg.get("text", "").strip()
-                chat_id = str(msg.get("chat", {}).get("id", ""))
-                if text == "/check" and chat_id:
-                    try:
-                        open_now = is_store_open()
-                        if open_now:
-                            reply = (
-                                "\u2705 Sushi Island \u0437\u0430\u0440\u0430\u0437 "
-                                "\u0412\u0406\u0414\u041a\u0420\u0418\u0422\u041e! "
-                                "\u041c\u043e\u0436\u043d\u0430 \u0437\u0430\u043c\u043e\u0432\u043b\u044f\u0442\u0438:\n"
-                                "https://glovoapp.com/uk/ua/dnipro/stores/sushi-island-dnp"
-                            )
-                        else:
-                            reply = (
-                                "\u274c Sushi Island \u0437\u0430\u0440\u0430\u0437 "
-                                "\u0417\u0410\u041a\u0420\u0418\u0422\u041e "
-                                "(\u0422\u0438\u043c\u0447\u0430\u0441\u043e\u0432\u043e "
-                                "\u043d\u0435 \u043f\u0440\u0430\u0446\u044e\u0454)"
-                            )
-                        send_telegram(chat_id, reply)
-                    except Exception as e:
-                        send_telegram(chat_id, f"Error: {e}")
-        except Exception as e:
-            print(f"[CMD ERROR] {e}")
-            time.sleep(5)
+            while True:
+                try:
+                    resp = requests.get(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
+                        params={"offset": offset, "timeout": 30},
+                        timeout=35,
+                    )
+                    for update in resp.json().get("result", []):
+                        offset = update["update_id"] + 1
+                        msg = update.get("message", {})
+                        text = msg.get("text", "").strip()
+                        chat_id = str(msg.get("chat", {}).get("id", ""))
+                        if text == "/check" and chat_id:
+                            statuses = {}
+                            for store in STORES:
+                                try:
+                                    statuses[store["id"]] = check_store(store, browser)
+                                except Exception:
+                                    statuses[store["id"]] = None
+                            send_telegram(chat_id, build_status_message(statuses))
+                except Exception as e:
+                    print(f"[CMD ERROR] {e}")
+                    time.sleep(5)
+        finally:
+            browser.close()
 
 
 def main():
-    print("Bot started. Monitoring Sushi Island...")
-    t = threading.Thread(target=command_loop, daemon=True)
+    print("Bot started. Monitoring Sushi Island (all locations)...")
+    was_open = {store["id"]: None for store in STORES}
+
+    t = threading.Thread(target=command_loop, args=(was_open,), daemon=True)
     t.start()
-    monitor_loop()
+
+    monitor_loop(was_open)
 
 
 if __name__ == "__main__":
