@@ -142,6 +142,7 @@ def monitor_loop():
     print("Bot started. Monitoring Sushi Island...", flush=True)
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        first_cycle = True
         try:
             while True:
                 for store in STORES:
@@ -162,6 +163,19 @@ def monitor_loop():
                             )
                     except Exception as e:
                         print(f"[ERROR] {store['id']}: {e}", flush=True)
+                if first_cycle:
+                    first_cycle = False
+                    parts = []
+                    with state_lock:
+                        for store in STORES:
+                            if store["platform"] == "Bolt Food":
+                                p = store_state[store["id"]].get("preview") or "none"
+                                safe = "".join(c if ord(c) >= 32 else " " for c in str(p))
+                                parts.append(f"[{store['id']}]\n{safe[:400]}")
+                    try:
+                        send_telegram(CHAT_ID, "BOOT DEBUG BOLT:\n\n" + "\n---\n".join(parts))
+                    except Exception as e:
+                        print(f"[DEBUG SEND ERROR] {e}", flush=True)
                 time.sleep(CHECK_INTERVAL)
         finally:
             browser.close()
