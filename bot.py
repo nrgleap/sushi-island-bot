@@ -60,13 +60,20 @@ def check_glovo(url: str) -> bool:
 
 
 def check_bolt(url: str, browser) -> bool:
-    page = browser.new_page()
+    ctx = browser.new_context(
+        locale="uk-UA",
+        extra_http_headers={"Accept-Language": "uk-UA,uk;q=0.9"},
+    )
+    page = ctx.new_page()
     try:
         page.goto(url, wait_until="networkidle", timeout=30000)
         content = page.content()
-        return BOLT_OPEN in content
+        snippet = content[:300].replace("\n", " ")
+        print(f"[BOLT DEBUG] {url[-30:]} | snippet: {snippet}", flush=True)
+        return "відчинено" in content.lower()
     finally:
         page.close()
+        ctx.close()
 
 
 def check_store(store: dict, browser) -> bool:
